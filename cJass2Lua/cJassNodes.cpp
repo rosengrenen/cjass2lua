@@ -11,6 +11,14 @@
 
 int globalTabMinus = 0;
 
+std::string transform_type(std::string type) {
+	if (type == "real")
+		type = "number";
+	if (type == "code")
+		type = "function";
+	return type;
+}
+
 namespace cJass
 {
 	static OperationObject::ConstType g_prevConst = OperationObject::ConstType::Undefined;
@@ -474,7 +482,12 @@ namespace cJass
 			_out << "-- " << _varName;
 
 		if (emmy)
-			_out << "\t" << "---@type " << _varType;
+		{
+			auto varType = transform_type(_varType);
+			if (_isArray)
+				varType += "[]";
+			_out << "\t" << "---@type " << varType;
+		}
 
 		if (_isNative)
 			_out << " (native) ";
@@ -609,47 +622,52 @@ namespace cJass
 
 	void Function::ToLua()
 	{
-		bool emmy = Settings::emmyDoc();
+		std::vector<std::tuple<std::string, std::string>> params = {};
+		size_t i = 0;
+		while (i < _args.size())
+		{
+			if (i + 1 >= _args.size())
+				appLog(Critical) << "Parameters of function " << _name << " are malformed";
 
+			bool isArray = false;
+			if (i + 2 < _args.size() && _args[i + 1] == "array")
+				isArray = true;
+
+			std::string type = transform_type(_args[i]);
+			if (isArray)
+				type += "[]";
+
+			std::string name = isArray ? _args[i + 2] : _args[i + 1];
+			params.push_back({ name, type });
+			i += (isArray ? 3 : 2);
+		}
+
+		bool emmy = Settings::emmyDoc();
 		if (emmy)
 		{
-			if (_args.size() > 0)
+			if (params.size() > 0)
 				_out << OutputInterface::nl;
-			std::string tmp;
-			for (size_t i = 0; i < _args.size(); i++)
+			for (auto& param : params)
 			{
-				if ((i+1) % 2 != 0)
-				{
-					tmp = _args[i];
-					continue;
-				}
-
-				if ((i + 1) % 2 == 0)
-					_out << OutputInterface::nl << "---@param " << _args[i] << " " << tmp;
+				_out << OutputInterface::nl << "---@param " << std::get<0>(param) << " " << std::get<1>(param);
 			}
-			_out << OutputInterface::nl << "---@return " << _returnType;
+			
+			auto returnType = transform_type(_returnType);
+			if (returnType != "nothing")
+				_out << OutputInterface::nl << "---@return " << returnType;
 		}
 		
 		_out << OutputInterface::nl << "function " << _name << "(";
 		
-		if (_args.size() == 0)
-			_out << ")";
-		else if (_args.size() == 2)
-			_out << _args[1] << ")";
-		else
+		for (auto it = params.begin(); it != params.end(); it++)
 		{
-			for (size_t i = 1; i < _args.size(); i++)
-			{
-				if (i % 2 != 0)
-				{
-					_out << _args[i];
-					if (i != _args.size() - 1)
-						_out << ", ";
-					else
-						_out << ")";
-				}
+			_out << std::get<0>(*it);
+			if (it != std::prev(params.end())) {
+				_out << ", ";
 			}
 		}
+
+		_out << ")";
 
 		if (!_isNative)
 		{
@@ -1760,7 +1778,10 @@ namespace cJass
 						_out << OutputInterface::nl << "---@param " << creationNode->Ptr<Method>()->_args[i] << " " << tmp;
 				}
 			}
-			_out << OutputInterface::nl << "---@return " << _className << OutputInterface::nl;
+
+			auto returnType = transform_type(_className);
+			if (returnType != "nothing")
+				_out << OutputInterface::nl << "---@return " << returnType << OutputInterface::nl;
 		}
 
 		//Print class header
@@ -2007,14 +2028,18 @@ namespace cJass
 						_out << OutputInterface::nl << "---@param " << _args[i] << " " << tmp;
 				}
 			}
-			if (!_isStatic)
+			auto returnType = transform_type(_returnType);
+			if (returnType != "nothing")
 			{
-				_out << OutputInterface::nl;
-				PrintTabs(1);
-				_out << "---@return " << _returnType;
+				if (!_isStatic)
+				{
+					_out << OutputInterface::nl;
+					PrintTabs(1);
+					_out << "---@return " << returnType;
+				}
+				else
+					_out << OutputInterface::nl << "---@return " << returnType;
 			}
-			else
-				_out << OutputInterface::nl << "---@return " << _returnType;
 		}
 
 		if (!_isStatic)
